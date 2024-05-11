@@ -1,0 +1,16 @@
+** interactive cli application
+
+when  run:
+prive
+
+
+it should check whether it already login to github yet,
+if already login to github
+
+then help user create a private repo name prive-note
+
+then user can create a note, by putting the name of the note they want:
+example: prive server-i9
+explain: first it will check in @user/prive/server-i9 repository in github, whether it have the server-i9 file or not, if not it will create,
+
+note: whenever user close the editor mode, it should push to github.
