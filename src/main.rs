@@ -1,11 +1,10 @@
 use clap::Parser;
+use rustyline::DefaultEditor;
+use std::fs;
+use std::fs::File;
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::{env, io};
-use std::path::Path;
-use std::fs::File;
-use std::fs;
-use rustyline::DefaultEditor;
-
 
 /// Command-line arguments for the program
 #[derive(Parser, Debug)]
@@ -60,8 +59,6 @@ fn run_interactive_menu() {
         }
     }
 }
-
-
 
 /// Handles the login process
 fn login() {
@@ -133,11 +130,11 @@ fn list_notes() {
 
     match fs::read_dir(&note_dir) {
         Ok(dir_contents) => {
-            let files: Vec<String> = dir_contents
+            let secured_files: Vec<String> = dir_contents
                 .filter_map(|entry| {
                     entry.ok().and_then(|e| {
                         if let Some(name) = e.file_name().to_str() {
-                            if !name.starts_with('.') {
+                            if name.ends_with(".secured") {
                                 Some(name.to_owned())
                             } else {
                                 None
@@ -149,26 +146,30 @@ fn list_notes() {
                 })
                 .collect();
 
-            if files.is_empty() {
-                println!("No notes found in ~/.prive-note.");
+            if secured_files.is_empty() {
+                println!("No secured notes found in ~/.prive-note.");
                 return;
             }
 
-            println!("Select a note to view:");
-            for (index, file) in files.iter().enumerate() {
+            println!("Select a secured note to view:");
+            for (index, file) in secured_files.iter().enumerate() {
                 println!("{}. {}", index + 1, file);
             }
 
             let mut choice = String::new(); // Change to String
 
-            if let Ok(_) = io::stdin().read_line(&mut choice) { // Read into String
+            if let Ok(_) = io::stdin().read_line(&mut choice) {
+                // Read into String
                 if let Ok(choice) = choice.trim().parse::<usize>() {
-                    if choice > 0 && choice <= files.len() {
-                        let selected_file = &files[choice - 1];
+                    if choice > 0 && choice <= secured_files.len() {
+                        let selected_file = &secured_files[choice - 1];
                         println!("Viewing note: {}", selected_file);
                         open_file_in_vim(&note_dir, selected_file);
                     } else {
-                        println!("Invalid choice. Please enter a number between 1 and {}.", files.len());
+                        println!(
+                            "Invalid choice. Please enter a number between 1 and {}.",
+                            secured_files.len()
+                        );
                     }
                 } else {
                     println!("Invalid input. Please enter a number.");
@@ -178,17 +179,24 @@ fn list_notes() {
             }
         }
         Err(_) => {
-            println!("Failed to list notes. The directory may not exist or is inaccessible.");
+            println!(
+                "Failed to list secured notes. The directory may not exist or is inaccessible."
+            );
         }
     }
 }
 
 /// Opens a file in Vim for editing
 fn open_file_in_vim(note_dir: &str, file_name: &str) {
-    let file_path = format!("{}/{}", note_dir, file_name);
+    let secured_file_path = format!("{}/{}", note_dir, file_name);
+    let decrypted_file_path = format!("{}/{}", note_dir, &file_name[..file_name.len()-8]); // Remove ".secured" from file name
 
+    // Decrypt the secured file
+    run_cmd(&format!("secured decrypt {}", secured_file_path));
+
+    // Open the decrypted file in Vim
     match Command::new("vim")
-        .arg(&file_path)
+        .arg(&decrypted_file_path)
         .status()
     {
         Ok(status) => {
@@ -211,7 +219,7 @@ fn open_file_in_vim(note_dir: &str, file_name: &str) {
             Ok(choice) => {
                 match choice {
                     1 => {
-                        save_changes(&file_path);
+                        save_changes(&decrypted_file_path);
                     }
                     2 => {
                         println!("Changes discarded.");
@@ -227,7 +235,7 @@ fn open_file_in_vim(note_dir: &str, file_name: &str) {
 }
 
 /// Saves changes made to a file
-fn save_changes(_file_path: &str) {
+fn save_changes(file_path: &str) {
     let target_dir = format!("{}/.prive-note/", env::var("HOME").unwrap());
 
     if let Err(_) = env::set_current_dir(&target_dir) {
@@ -235,13 +243,20 @@ fn save_changes(_file_path: &str) {
         return;
     }
 
-    run_cmd("git add .");
+    // Encrypt the file
+    let encrypted_file = format!("{}", file_path);
+    let encrypted_file_secure = format!("{}.secured", file_path);
+    run_cmd(&format!("secured encrypt {}", &file_path));
+    // Delete the original after encrypt
+    run_cmd(&format!("rm -rf {}", &file_path));
+
+    // Add, commit, and push the encrypted file
+    run_cmd(&format!("git add {}", encrypted_file_secure));
     run_cmd("git commit -m 'update'");
     run_cmd("git push origin main");
 
     println!("Changes committed and pushed successfully.");
 }
-
 /// Creates a new note
 fn create_note() {
     let note_dir = format!("{}/.prive-note", env::var("HOME").unwrap());
@@ -260,7 +275,7 @@ fn create_note() {
             return;
         }
 
-        let file_path = format!("{}/{}", note_dir, note_name);
+        let file_path = format!("{}/{}.secured", note_dir, note_name);
         match File::create(&file_path) {
             Ok(_) => println!("Note '{}' created successfully.", note_name),
             Err(e) => println!("Failed to create note: {}", e),
@@ -270,13 +285,35 @@ fn create_note() {
     }
 }
 
-/// Opens a note in Vim
+/// Opens a note in Vim, encrypts it back after editing and exiting Vim, and deletes the original note file
 fn open_note(note: &str) {
     let note_path = format!("{}/.prive-note/{}", env::var("HOME").unwrap(), note);
-    if let Err(err) = Command::new("vim")
-        .arg(&note_path)
-        .status()
-    {
-        eprintln!("Error opening note: {}", err);
+    let encrypted_note_path = format!("{}.secured", note_path);
+
+    // Check if the original note file exists
+    if Path::new(&note_path).exists() {
+        // Open the note in Vim
+        if let Err(err) = Command::new("vim").arg(&note_path).status() {
+            eprintln!("Error opening note: {}", err);
+            return;
+        }
+
+        // After exiting Vim, encrypt the note back
+        if let Err(err) = Command::new("secured").args(&["encrypt", &note_path]).status() {
+            eprintln!("Error encrypting note: {}", err);
+        }
+
+        // Delete the original note file
+        if let Err(err) = fs::remove_file(&note_path) {
+            eprintln!("Error deleting original note: {}", err);
+        }
+    } else {
+        // If the original note file doesn't exist, check if the corresponding encrypted note exists
+        if Path::new(&encrypted_note_path).exists() {
+            // Encrypted note exists, remove it
+            if let Err(err) = fs::remove_file(&encrypted_note_path) {
+                eprintln!("Error removing encrypted note: {}", err);
+            }
+        }
     }
 }
