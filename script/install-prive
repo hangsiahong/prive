@@ -1,0 +1,35 @@
+#!/bin/bash
+
+
+# Check for github-cli
+if ! command -v gh &> /dev/null; then
+  echo "github-cli not found. Installing..."
+
+  # Attempt installation based on package manager
+  if [ -x "$(command -v apt-get)" ]; then
+    sudo apt-get update && sudo apt-get install gh
+  elif [ -x "$(command -v yum)" ]; then
+    sudo yum install -y gh
+  elif [ -x "$(command -v dnf)" ]; then
+    sudo dnf install -y gh
+  elif [ -x "$(command -v brew)" ]; then
+    brew install gh
+  elif [ -x "$(command -v pacman)" ]; then
+    sudo pacman -S github-cli --no-confirm
+  else
+    echo "WARNING: Package manager not detected. Please install github-cli manually."
+  fi
+fi
+
+# Verify installation
+if command -v gh &> /dev/null; then
+  echo "Github Cli already installed in your system"
+else
+  echo "ERROR: github-cli installation failed."
+fi
+
+wget https://github.com/hangsiahong/prive/raw/master/bin/secured
+wget https://github.com/hangsiahong/prive/raw/master/bin/prive
+
+chmod +x {secured,prive}
+sudo mv {secured,prive} /usr/bin/
