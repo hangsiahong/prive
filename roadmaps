@@ -14,3 +14,8 @@ example: prive server-i9
 explain: first it will check in @user/prive/server-i9 repository in github, whether it have the server-i9 file or not, if not it will create,
 
 note: whenever user close the editor mode, it should push to github.
+
+
+
+### more feautures
+password hint, incase people forgot

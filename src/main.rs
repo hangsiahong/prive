@@ -314,7 +314,7 @@ fn open_file_in_vim(note_dir: &str, file_name: &str) -> bool {
     }
 
     // Open the decrypted file in Vim
-    match Command::new("vim").arg(&decrypted_file_path).status() {
+    match Command::new("nvim").arg(&decrypted_file_path).status() {
         Ok(status) => {
             if !status.success() {
                 println!("Failed to open the file in Vim.");
@@ -512,7 +512,7 @@ fn delete_note() {
                         run_cmd("git push origin main");
 
                         println!("Changes committed and pushed successfully.");
-                      
+
                     } else {
                         println!(
                             "Invalid choice. Please enter a number between 1 and {}.",

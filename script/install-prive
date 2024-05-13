@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Script filename (for self-deletion)
+script_name="$0"
 
 # Check for github-cli
 if ! command -v gh &> /dev/null; then
@@ -28,8 +30,12 @@ else
   echo "ERROR: github-cli installation failed."
 fi
 
+# Download prive
 wget https://github.com/hangsiahong/prive/raw/master/bin/secured
 wget https://github.com/hangsiahong/prive/raw/master/bin/prive
 
 chmod +x {secured,prive}
 sudo mv {secured,prive} /usr/bin/
+
+# Delete the script itself
+rm -rf "$script_name"
