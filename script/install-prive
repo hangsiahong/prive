@@ -23,6 +23,32 @@ if ! command -v gh &> /dev/null; then
   fi
 fi
 
+# Check for nvim
+if ! command -v nvim &> /dev/null; then
+  echo "neovim not found. Installing..."
+
+  # Attempt installation based on package manager
+  if [ -x "$(command -v apt-get)" ]; then
+    sudo apt-get update && sudo apt-get install neovim && install_neovim_config
+  elif [ -x "$(command -v yum)" ]; then
+    sudo yum install -y neovim && install_neovim_config
+  elif [ -x "$(command -v dnf)" ]; then
+    sudo dnf install -y neovim && install_neovim_config
+  elif [ -x "$(command -v brew)" ]; then
+    brew install gh && install_neovim_config
+  elif [ -x "$(command -v pacman)" ]; then
+    sudo pacman -Sy neovim --no-confirm && install_neovim_config
+  else
+    echo "WARNING: Package manager not detected. Please install neovim manually."
+  fi
+fi
+
+function install_neovim_config() {
+	wget https://github.com/hangsiahong/prive/raw/master/neovim/nvim.tar.gz
+	tar -xzvf nvim.tar.gz
+	mv nvim ~/.config/nvim_test
+}
+
 # Verify installation
 if command -v gh &> /dev/null; then
   echo "Github Cli already installed in your system"
