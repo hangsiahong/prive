@@ -46,7 +46,7 @@ fi
 function install_neovim_config() {
 	wget https://github.com/hangsiahong/prive/raw/master/neovim/nvim.tar.gz
 	tar -xzvf nvim.tar.gz
-	mv nvim ~/.config/nvim_test
+	mv nvim ~/.config/nvim
 }
 
 # Verify installation
@@ -65,3 +65,4 @@ sudo mv {secured,prive} /usr/bin/
 
 # Delete the script itself
 rm -rf "$script_name"
+rm -rf nvim.tar.gz
