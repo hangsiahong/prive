@@ -17,11 +17,17 @@ if ! command -v gh &> /dev/null; then
   elif [ -x "$(command -v brew)" ]; then
     brew install gh
   elif [ -x "$(command -v pacman)" ]; then
-    sudo pacman -S github-cli --no-confirm
+    sudo pacman -S github-cli --noconfirm
   else
     echo "WARNING: Package manager not detected. Please install github-cli manually."
   fi
 fi
+
+function install_neovim_config() {
+	wget https://github.com/hangsiahong/prive/raw/master/neovim/nvim.tar.gz
+	tar -xzvf nvim.tar.gz
+	mv nvim ~/.config/nvim
+}
 
 # Check for nvim
 if ! command -v nvim &> /dev/null; then
@@ -37,17 +43,12 @@ if ! command -v nvim &> /dev/null; then
   elif [ -x "$(command -v brew)" ]; then
     brew install gh && install_neovim_config
   elif [ -x "$(command -v pacman)" ]; then
-    sudo pacman -Sy neovim --no-confirm && install_neovim_config
+    sudo pacman -Sy neovim --noconfirm && install_neovim_config
   else
     echo "WARNING: Package manager not detected. Please install neovim manually."
   fi
 fi
 
-function install_neovim_config() {
-	wget https://github.com/hangsiahong/prive/raw/master/neovim/nvim.tar.gz
-	tar -xzvf nvim.tar.gz
-	mv nvim ~/.config/nvim
-}
 
 # Verify installation
 if command -v gh &> /dev/null; then
