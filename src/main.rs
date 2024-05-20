@@ -2,6 +2,7 @@ use clap::Parser;
 use rustyline::DefaultEditor;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::env::args;
 use std::fs;
 use std::fs::File;
@@ -13,6 +14,10 @@ use std::{env, io};
 
 use std::error::Error;
 use std::fs::OpenOptions;
+use std::time::Duration;
+
+
+
 
 /// Command-line arguments for the program
 #[derive(Parser, Debug)]
@@ -54,6 +59,54 @@ impl LoginState {
         let json = serde_json::to_string(self).unwrap();
         let mut file = File::create(&config_file).unwrap();
         file.write_all(json.as_bytes()).unwrap();
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct NoteDatabase {
+    password_hints: HashMap<String, String>,
+}
+
+impl NoteDatabase {
+    /// Loads the note database from a configuration file
+    fn load() -> Self {
+        let db_file = format!("{}/.prive-note/note-db.json", env::var("HOME").unwrap());
+
+        if let Ok(mut file) = File::open(&db_file) {
+            let mut contents = String::new();
+            file.read_to_string(&mut contents).unwrap();
+            serde_json::from_str(&contents).unwrap_or(NoteDatabase {
+                password_hints: HashMap::new(),
+            })
+        } else {
+            NoteDatabase {
+                password_hints: HashMap::new(),
+            }
+        }
+    }
+
+    /// Saves the note database to a configuration file
+    fn save(&self) {
+        let db_file = format!("{}/.prive-note/note-db.json", env::var("HOME").unwrap());
+
+        let json = serde_json::to_string(self).unwrap();
+        let mut file = File::create(&db_file).unwrap();
+        file.write_all(json.as_bytes()).unwrap();
+    }
+
+    // Adjust the return type to Option<String> instead of Option<&str>
+    fn get_password_hint(&self, file: &str) -> Option<String> {
+        self.password_hints.get(file).cloned()
+    }
+
+    fn get_password_hint_with_default(&self, file: &str) -> String {
+        self.get_password_hint(file)
+            .map(String::from)
+            .unwrap_or_else(|| "No hint".to_string())
+    }
+
+    fn set_password_hint(&mut self, file: &str, hint: String) {
+        self.password_hints.insert(file.to_string(), hint);
     }
 }
 
@@ -243,6 +296,7 @@ fn run_cmd_result(command: &str) -> Result<(), Box<dyn Error>> {
 
 fn list_notes() {
     let note_dir = format!("{}/.prive-note", env::var("HOME").unwrap());
+    let note_db = NoteDatabase::load();
 
     match fs::read_dir(&note_dir) {
         Ok(dir_contents) => {
@@ -269,7 +323,9 @@ fn list_notes() {
 
             println!("Select a secured note to view:");
             for (index, file) in secured_files.iter().enumerate() {
-                println!("{}. {}", index + 1, file);
+                // Use get_password_hint_with_default to get the hint
+                let hint = note_db.get_password_hint_with_default(file);
+                println!("{}. {} (Password Hint: {})", index + 1, file, hint);
             }
 
             let mut choice = String::new(); // Change to String
@@ -301,7 +357,6 @@ fn list_notes() {
         }
     }
 }
-
 /// Opens a file in Vim for editing
 fn open_file_in_vim(note_dir: &str, file_name: &str) -> bool {
     let secured_file_path = format!("{}/{}", note_dir, file_name);
@@ -358,6 +413,29 @@ fn open_file_in_vim(note_dir: &str, file_name: &str) -> bool {
         false
     }
 }
+// /// Saves changes made to a file
+// fn save_changes(file_path: &str) {
+//     let target_dir = format!("{}/.prive-note/", env::var("HOME").unwrap());
+
+//     if let Err(_) = env::set_current_dir(&target_dir) {
+//         println!("Failed to change directory to {}", target_dir);
+//         return;
+//     }
+
+//     // Encrypt the file
+//     let encrypted_file = format!("{}", file_path);
+//     let encrypted_file_secure = format!("{}.secured", file_path);
+//     run_cmd(&format!("secured encrypt {}", &file_path));
+//     // Delete the original after encrypt
+//     run_cmd(&format!("rm -rf {}", &file_path));
+
+//     // Add, commit, and push the encrypted file
+//     run_cmd(&format!("git add {}", encrypted_file_secure));
+//     run_cmd("git commit -m 'update'");
+//     run_cmd("git push origin main");
+
+//     println!("Changes committed and pushed successfully.");
+// }
 /// Saves changes made to a file
 fn save_changes(file_path: &str) {
     let target_dir = format!("{}/.prive-note/", env::var("HOME").unwrap());
@@ -367,24 +445,45 @@ fn save_changes(file_path: &str) {
         return;
     }
 
-    // Encrypt the file
+    // Encrypt the file with password verification
     let encrypted_file = format!("{}", file_path);
     let encrypted_file_secure = format!("{}.secured", file_path);
-    run_cmd(&format!("secured encrypt {}", &file_path));
+    loop {
+        println!("Enter a password to encrypt the note:");
+        let mut password = String::new();
+        if let Ok(_) = io::stdin().read_line(&mut password) {
+            password = password.trim().to_string();
+            if run_cmd(&format!("secured encrypt {} -p {}", &file_path, &password)) {
+                break;
+            } else {
+                println!("Error: Incorrect password. Please try again.");
+            }
+        } else {
+            println!("Error reading input.");
+            return;
+        }
+    }
+    
     // Delete the original after encrypt
     run_cmd(&format!("rm -rf {}", &file_path));
 
     // Add, commit, and push the encrypted file
+    std::thread::sleep(Duration::from_secs(1));
+
     run_cmd(&format!("git add {}", encrypted_file_secure));
+    std::thread::sleep(Duration::from_secs(1));
     run_cmd("git commit -m 'update'");
+    std::thread::sleep(Duration::from_secs(1));
     run_cmd("git push origin main");
 
     println!("Changes committed and pushed successfully.");
 }
 
-/// Creates a new note
 fn create_note() {
     let note_dir = format!("{}/.prive-note", env::var("HOME").unwrap());
+    let mut note_db = NoteDatabase::load();
+
+    env::set_current_dir(&note_dir);
 
     if !Path::new(&note_dir).exists() {
         println!("Error: The note directory doesn't exist.");
@@ -401,12 +500,27 @@ fn create_note() {
         }
 
         let file_path = format!("{}/{}", note_dir, note_name);
+        // Encrypt note name
+        let secured_note_name = format!("{}.secured", note_name);
         // Prompt the user to enter a password
         println!("Enter a password for the note:");
         let mut password = String::new();
         if let Ok(_) = io::stdin().read_line(&mut password) {
             // Remove newline characters from the password
             password = password.trim().to_string();
+
+            println!("Do you want to set a password hint? (yes/no)");
+            let mut hint_choice = String::new();
+            if let Ok(_) = io::stdin().read_line(&mut hint_choice) {
+                if hint_choice.trim().eq_ignore_ascii_case("yes") {
+                    println!("Enter the password hint:");
+                    let mut password_hint = String::new();
+                    if let Ok(_) = io::stdin().read_line(&mut password_hint) {
+                        note_db.set_password_hint(&secured_note_name, password_hint.trim().to_string());
+                        note_db.save();
+                    }
+                }
+            }
 
             // Create the note file with the template content
             match OpenOptions::new()
@@ -450,11 +564,20 @@ fn create_note() {
     } else {
         println!("Failed to read input.");
     }
+    // After encrypting and pushing the encrypted file
+    println!("Changes committed and pushed successfully.");
+
+    std::thread::sleep(Duration::from_secs(1));
+    // git commit note-db.json to github
+    // Add, commit, and push the encrypted file
+    run_cmd("git add note-db.json");
+    std::thread::sleep(Duration::from_secs(1));
+    run_cmd("git commit -m 'update'");
+    std::thread::sleep(Duration::from_secs(1));
+    run_cmd("git push origin main");
 }
 /// Deletes a note
 fn delete_note() {
-
-
     let note_dir = format!("{}/.prive-note", env::var("HOME").unwrap());
 
     match fs::read_dir(&note_dir) {
@@ -490,7 +613,6 @@ fn delete_note() {
             if let Ok(_) = io::stdin().read_line(&mut choice) {
                 if let Ok(choice) = choice.trim().parse::<usize>() {
                     if choice > 0 && choice <= secured_files.len() {
-
                         let selected_file = &secured_files[choice - 1];
                         println!("Deleting note: {}", selected_file);
 
@@ -505,14 +627,13 @@ fn delete_note() {
                         let encrypted_file_secure = format!("{}", selected_file);
                         // Add, commit, and push the encrypted file
                         run_cmd(&format!("git rm -rf {}", encrypted_file_secure));
+                        std::thread::sleep(Duration::from_secs(1));
                         let commit_message = format!("Delete note: {}", selected_file);
-                        // run_cmd(&format!("git commit -m '{}'", commit_message));
-
                         run_cmd("git commit -m remove");
+                        std::thread::sleep(Duration::from_secs(1));
                         run_cmd("git push origin main");
 
                         println!("Changes committed and pushed successfully.");
-
                     } else {
                         println!(
                             "Invalid choice. Please enter a number between 1 and {}.",
