@@ -27,6 +27,11 @@ use std::time::Duration;
 struct Args {
     #[arg(short, long)]
     open: Option<String>,
+
+    #[arg(short, long)]
+    /// Clone private access note from other Repository
+    clone: Option<String>,
+    
 }
 
 /// Struct to represent the login state
@@ -113,8 +118,11 @@ impl NoteDatabase {
 fn main() {
     let args = Args::parse();
 
-    if let Some(note) = args.open {
+    if let Some(note) = &args.open {
+        // Dereference the String reference to get a &str
         open_note(&note);
+    } else if let Some(clone_repo) = &args.clone {
+        clone_repository(clone_repo);
     } else {
         let mut login_state = LoginState::load();
 
@@ -135,8 +143,8 @@ fn main() {
                             println!("Login successful. Proceeding to handle repositories...");
                             let github_username = get_github_username();
                             handle_repository(&github_username);
-                            login_state.logged_in = true; // Set logged_in to true after successful login
-                            login_state.save(); // Save the login state
+                            login_state.logged_in = true;
+                            login_state.save();
                         } else {
                             println!("Login failed.");
                             return;
@@ -155,7 +163,7 @@ fn main() {
 
         run_interactive_menu();
     }
-}
+} 
 
 /// Runs the interactive menu for the CLI application
 fn run_interactive_menu() {
@@ -804,4 +812,12 @@ fn get_github_username() -> String {
 
     // Return an empty string if the username cannot be extracted
     String::new()
+}
+
+fn clone_repository(repo: &str) {
+    let repo_path = format!("{}/.prive/{}", env::var("HOME").unwrap(), repo);
+
+    println!("Cloning repository from {}", repo);
+
+    run_cmd(&format!("gh repo clone {}/prive-note {}", repo, repo_path));
 }
