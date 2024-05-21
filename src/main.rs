@@ -11,6 +11,8 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::{env, io};
+use std::str;
+
 
 use std::error::Error;
 use std::fs::OpenOptions;
@@ -69,8 +71,8 @@ struct NoteDatabase {
 
 impl NoteDatabase {
     /// Loads the note database from a configuration file
-    fn load() -> Self {
-        let db_file = format!("{}/.prive-note/note-db.json", env::var("HOME").unwrap());
+    fn load(repo_name: &str) -> Self {
+        let db_file = format!("{}/.prive/{}/note-db.json", env::var("HOME").unwrap(), repo_name);
 
         if let Ok(mut file) = File::open(&db_file) {
             let mut contents = String::new();
@@ -86,12 +88,10 @@ impl NoteDatabase {
     }
 
     /// Saves the note database to a configuration file
-    fn save(&self) {
-        let db_file = format!("{}/.prive-note/note-db.json", env::var("HOME").unwrap());
-
-        let json = serde_json::to_string(self).unwrap();
-        let mut file = File::create(&db_file).unwrap();
-        file.write_all(json.as_bytes()).unwrap();
+    fn save(&self, repo_name: &str) {
+        let db_file = format!("{}/.prive/{}/note-db.json", env::var("HOME").unwrap(), repo_name);
+        let serialized = serde_json::to_string(self).unwrap();
+        fs::write(db_file, serialized).unwrap();
     }
 
     // Adjust the return type to Option<String> instead of Option<&str>
@@ -125,14 +125,16 @@ fn main() {
             if let Ok(_) = io::stdin().read_line(&mut choice) {
                 match choice.trim().to_lowercase().as_str() {
                     "yes" => {
-                        handle_repository();
+                        let github_username = get_github_username();
+                        handle_repository(&github_username);
                         login_state.logged_in = true;
                         login_state.save();
                     }
                     "no" => {
                         if login() {
                             println!("Login successful. Proceeding to handle repositories...");
-                            handle_repository();
+                            let github_username = get_github_username();
+                            handle_repository(&github_username);
                             login_state.logged_in = true; // Set logged_in to true after successful login
                             login_state.save(); // Save the login state
                         } else {
@@ -179,7 +181,8 @@ fn run_interactive_menu() {
                     1 if !login_state.logged_in => {
                         if login() {
                             println!("Login successful. Proceeding to handle repositories...");
-                            handle_repository();
+                            let github_username = get_github_username();
+                            handle_repository(&github_username);
                             login_state.logged_in = true; // Set logged_in to true after successful login
                             login_state.save(); // Save the login state
                         } else {
@@ -214,8 +217,8 @@ fn login() -> bool {
 }
 
 /// Handles the repository operations
-fn handle_repository() {
-    let repo_path = format!("{}/.prive-note", env::var("HOME").unwrap());
+fn handle_repository(github_username: &str) {
+    let repo_path = format!("{}/.prive/", env::var("HOME").unwrap());
     let repo_exists = Path::new(&repo_path).exists();
 
     if repo_exists {
@@ -223,7 +226,7 @@ fn handle_repository() {
         pull_repository(&repo_path);
     } else {
         println!("Repository 'prive-note' does not exist. Creating...");
-        create_repository(&repo_path);
+        create_repository(&repo_path, github_username);
     }
 }
 
@@ -239,13 +242,13 @@ fn pull_repository(repo_path: &str) {
 }
 
 /// Creates a new repository
-fn create_repository(repo_path: &str) {
+fn create_repository(repo_path: &str, github_username: &str) {
     println!("Creating repository at {}", repo_path);
-    run_cmd("gh repo create prive-note --private");
+    run_cmd(&format!("gh repo create {}/prive-note --private", github_username));
 
-    let target_dir = format!("{}/.prive-note", env::var("HOME").unwrap());
+    let target_dir = format!("{}/.prive/", env::var("HOME").unwrap());
     println!("Cloning repository to {}", target_dir);
-    run_cmd(&format!("gh repo clone prive-note {}", target_dir));
+    run_cmd(&format!("gh repo clone {}/prive-note {}/{}", github_username, target_dir, github_username));
 }
 
 /// Runs a command in the shell
@@ -295,8 +298,67 @@ fn run_cmd_result(command: &str) -> Result<(), Box<dyn Error>> {
 }
 
 fn list_notes() {
-    let note_dir = format!("{}/.prive-note", env::var("HOME").unwrap());
-    let note_db = NoteDatabase::load();
+    let prive_dir = format!("{}/.prive", env::var("HOME").unwrap());
+
+    // List repositories in the .prive directory
+    match fs::read_dir(&prive_dir) {
+        Ok(dir_contents) => {
+            let repositories: Vec<String> = dir_contents
+                .filter_map(|entry| {
+                    entry.ok().and_then(|e| {
+                        if let Some(name) = e.file_name().to_str() {
+                            Some(name.to_owned())
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect();
+
+            if repositories.is_empty() {
+                println!("No repositories found in ~/.prive.");
+                return;
+            }
+
+            println!("Select a repository to view notes:");
+
+            for (index, repo) in repositories.iter().enumerate() {
+                println!("{}. {}", index + 1, repo);
+            }
+
+            let mut choice = String::new();
+
+            if let Ok(_) = io::stdin().read_line(&mut choice) {
+                if let Ok(choice) = choice.trim().parse::<usize>() {
+                    if choice > 0 && choice <= repositories.len() {
+                        let selected_repo = &repositories[choice - 1];
+                        println!("Listing notes for repository: {}", selected_repo);
+                        list_notes_in_repository(selected_repo);
+                    } else {
+                        println!(
+                            "Invalid choice. Please enter a number between 1 and {}.",
+                            repositories.len()
+                        );
+                    }
+                } else {
+                    println!("Invalid input. Please enter a number.");
+                }
+            } else {
+                println!("Error reading input.");
+            }
+        }
+        Err(_) => {
+            println!(
+                "Failed to list repositories. The directory may not exist or is inaccessible."
+            );
+        }
+    }
+}
+
+// Helper function to list notes in a specific repository
+fn list_notes_in_repository(repo_name: &str) {
+    let note_dir = format!("{}/.prive/{}", env::var("HOME").unwrap(), repo_name);
+    let note_db = NoteDatabase::load(repo_name);
 
     match fs::read_dir(&note_dir) {
         Ok(dir_contents) => {
@@ -317,21 +379,19 @@ fn list_notes() {
                 .collect();
 
             if secured_files.is_empty() {
-                println!("No secured notes found in ~/.prive-note.");
+                println!("No secured notes found in {}.", note_dir);
                 return;
             }
 
             println!("Select a secured note to view:");
             for (index, file) in secured_files.iter().enumerate() {
-                // Use get_password_hint_with_default to get the hint
                 let hint = note_db.get_password_hint_with_default(file);
                 println!("{}. {} (Password Hint: {})", index + 1, file, hint);
             }
 
-            let mut choice = String::new(); // Change to String
+            let mut choice = String::new();
 
             if let Ok(_) = io::stdin().read_line(&mut choice) {
-                // Read into String
                 if let Ok(choice) = choice.trim().parse::<usize>() {
                     if choice > 0 && choice <= secured_files.len() {
                         let selected_file = &secured_files[choice - 1];
@@ -413,29 +473,7 @@ fn open_file_in_vim(note_dir: &str, file_name: &str) -> bool {
         false
     }
 }
-// /// Saves changes made to a file
-// fn save_changes(file_path: &str) {
-//     let target_dir = format!("{}/.prive-note/", env::var("HOME").unwrap());
 
-//     if let Err(_) = env::set_current_dir(&target_dir) {
-//         println!("Failed to change directory to {}", target_dir);
-//         return;
-//     }
-
-//     // Encrypt the file
-//     let encrypted_file = format!("{}", file_path);
-//     let encrypted_file_secure = format!("{}.secured", file_path);
-//     run_cmd(&format!("secured encrypt {}", &file_path));
-//     // Delete the original after encrypt
-//     run_cmd(&format!("rm -rf {}", &file_path));
-
-//     // Add, commit, and push the encrypted file
-//     run_cmd(&format!("git add {}", encrypted_file_secure));
-//     run_cmd("git commit -m 'update'");
-//     run_cmd("git push origin main");
-
-//     println!("Changes committed and pushed successfully.");
-// }
 /// Saves changes made to a file
 fn save_changes(file_path: &str) {
     let target_dir = format!("{}/.prive-note/", env::var("HOME").unwrap());
@@ -463,7 +501,7 @@ fn save_changes(file_path: &str) {
             return;
         }
     }
-    
+
     // Delete the original after encrypt
     run_cmd(&format!("rm -rf {}", &file_path));
 
@@ -480,19 +518,72 @@ fn save_changes(file_path: &str) {
 }
 
 fn create_note() {
-    let note_dir = format!("{}/.prive-note", env::var("HOME").unwrap());
-    let mut note_db = NoteDatabase::load();
+    let prive_dir = format!("{}/.prive", env::var("HOME").unwrap());
 
-    env::set_current_dir(&note_dir);
-
-    if !Path::new(&note_dir).exists() {
-        println!("Error: The note directory doesn't exist.");
+    // Check if .prive directory exists
+    if !Path::new(&prive_dir).exists() {
+        println!("Error: The .prive directory doesn't exist.");
         return;
     }
+
+    // List available repositories
+    println!("Choose a repository to create the note in:");
+    let mut repos = Vec::new();
+    if let Ok(entries) = fs::read_dir(&prive_dir) {
+        for entry in entries {
+            if let Ok(entry) = entry {
+                if let Some(file_name) = entry.file_name().to_str() {
+                    if file_name != "note-db.json" {
+                        repos.push(file_name.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Display available repositories
+    for (index, repo) in repos.iter().enumerate() {
+        println!("{}. {}", index + 1, repo);
+    }
+
+    // Prompt user to choose a repository
+    let mut choice = String::new();
+    if let Ok(_) = io::stdin().read_line(&mut choice) {
+        if let Ok(repo_index) = choice.trim().parse::<usize>() {
+            if repo_index > 0 && repo_index <= repos.len() {
+                let selected_repo = &repos[repo_index - 1];
+
+                // Proceed to create the note in the selected repository
+                create_note_in_repo(selected_repo);
+                return;
+            }
+        }
+    }
+
+    println!("Invalid choice. Exiting...");
+}
+
+fn create_note_in_repo(repo_name: &str) {
+    println!("Creating note in repository: {}", repo_name);
+
+    let note_dir = format!("{}/.prive/{}", env::var("HOME").unwrap(), repo_name);
+    println!("Note directory: {}", note_dir);
+    let mut note_db = NoteDatabase::load(repo_name);
+    println!("Note database loaded");
+
+
+    // Set current directory to the note directory
+    if let Err(_) = env::set_current_dir(&note_dir) {
+        println!("Failed to change directory to {}", note_dir);
+        return;
+    }
+    println!("Changed directory to {}", note_dir);
+
 
     println!("Enter the name of the new note:");
     let mut note_name = String::new();
     if let Ok(_) = io::stdin().read_line(&mut note_name) {
+        println!("Note name entered: {}", note_name);
         let note_name = note_name.trim();
         if note_name.is_empty() {
             println!("Error: Note name cannot be empty.");
@@ -517,8 +608,7 @@ fn create_note() {
                     let mut password_hint = String::new();
                     if let Ok(_) = io::stdin().read_line(&mut password_hint) {
                         note_db.set_password_hint(&secured_note_name, password_hint.trim().to_string());
-                        note_db.save();
-                    }
+                        note_db.save(repo_name);                    }
                 }
             }
 
@@ -564,6 +654,7 @@ fn create_note() {
     } else {
         println!("Failed to read input.");
     }
+
     // After encrypting and pushing the encrypted file
     println!("Changes committed and pushed successfully.");
 
@@ -688,4 +779,29 @@ fn open_note(note: &str) {
             }
         }
     }
+}
+
+// Function to get the GitHub username from the `gh auth status` command
+fn get_github_username() -> String {
+    let output = Command::new("gh")
+        .arg("auth")
+        .arg("status")
+        .output()
+        .expect("Failed to execute command");
+
+    if output.status.success() {
+        let stdout = str::from_utf8(&output.stdout).expect("Invalid UTF-8");
+        // Parse the output to extract the username
+        for line in stdout.lines() {
+            if line.contains("Logged in to github.com account") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if let Some(username) = parts.get(6) {
+                    return username.to_string();
+                }
+            }
+        }
+    }
+
+    // Return an empty string if the username cannot be extracted
+    String::new()
 }
