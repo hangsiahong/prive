@@ -31,7 +31,7 @@ struct Args {
     #[arg(short, long)]
     /// Clone private access note from other Repository
     clone: Option<String>,
-    
+
 }
 
 /// Struct to represent the login state
@@ -163,7 +163,7 @@ fn main() {
 
         run_interactive_menu();
     }
-} 
+}
 
 /// Runs the interactive menu for the CLI application
 fn run_interactive_menu() {
@@ -459,7 +459,7 @@ fn open_file_in_vim(note_dir: &str, file_name: &str) -> bool {
         match choice.trim().parse::<u32>() {
             Ok(choice) => match choice {
                 1 => {
-                    save_changes(&decrypted_file_path);
+                    save_changes(&decrypted_file_path, &note_dir);
                     true
                 }
                 2 => {
@@ -483,16 +483,14 @@ fn open_file_in_vim(note_dir: &str, file_name: &str) -> bool {
 }
 
 /// Saves changes made to a file
-fn save_changes(file_path: &str) {
-    let target_dir = format!("{}/.prive-note/", env::var("HOME").unwrap());
-
-    if let Err(_) = env::set_current_dir(&target_dir) {
+fn save_changes(file_path: &str, target_dir: &str) {
+    // Ensure error handling for changing directory
+    if let Err(_) = env::set_current_dir(target_dir) {
         println!("Failed to change directory to {}", target_dir);
         return;
     }
 
     // Encrypt the file with password verification
-    let encrypted_file = format!("{}", file_path);
     let encrypted_file_secure = format!("{}.secured", file_path);
     loop {
         println!("Enter a password to encrypt the note:");
@@ -510,17 +508,31 @@ fn save_changes(file_path: &str) {
         }
     }
 
-    // Delete the original after encrypt
-    run_cmd(&format!("rm -rf {}", &file_path));
+    // Delete the original file after encryption
+    if let Err(err) = fs::remove_file(&file_path) {
+        println!("Failed to delete original file: {}", err);
+        return;
+    }
 
     // Add, commit, and push the encrypted file
     std::thread::sleep(Duration::from_secs(1));
 
-    run_cmd(&format!("git add {}", encrypted_file_secure));
+    if !run_cmd(&format!("git add {}", encrypted_file_secure)) {
+        println!("Failed to stage changes.");
+        return;
+    }
+
     std::thread::sleep(Duration::from_secs(1));
-    run_cmd("git commit -m 'update'");
+    if !run_cmd("git commit -m 'update'") {
+        println!("Failed to commit changes.");
+        return;
+    }
+
     std::thread::sleep(Duration::from_secs(1));
-    run_cmd("git push origin main");
+    if !run_cmd("git push origin main") {
+        println!("Failed to push changes.");
+        return;
+    }
 
     println!("Changes committed and pushed successfully.");
 }
@@ -675,9 +687,67 @@ fn create_note_in_repo(repo_name: &str) {
     std::thread::sleep(Duration::from_secs(1));
     run_cmd("git push origin main");
 }
-/// Deletes a note
+/// Deletes a note from a selected repository
 fn delete_note() {
-    let note_dir = format!("{}/.prive-note", env::var("HOME").unwrap());
+    let prive_dir = format!("{}/.prive", env::var("HOME").unwrap());
+
+    // List repositories in the .prive directory
+    match fs::read_dir(&prive_dir) {
+        Ok(dir_contents) => {
+            let repositories: Vec<String> = dir_contents
+                .filter_map(|entry| {
+                    entry.ok().and_then(|e| {
+                        if let Some(name) = e.file_name().to_str() {
+                            Some(name.to_owned())
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect();
+
+            if repositories.is_empty() {
+                println!("No repositories found in ~/.prive.");
+                return;
+            }
+
+            println!("Select a repository to delete notes from:");
+
+            for (index, repo) in repositories.iter().enumerate() {
+                println!("{}. {}", index + 1, repo);
+            }
+
+            let mut choice = String::new();
+
+            if let Ok(_) = io::stdin().read_line(&mut choice) {
+                if let Ok(choice) = choice.trim().parse::<usize>() {
+                    if choice > 0 && choice <= repositories.len() {
+                        let selected_repo = &repositories[choice - 1];
+                        println!("Deleting notes for repository: {}", selected_repo);
+                        delete_notes_in_repository(selected_repo);
+                    } else {
+                        println!(
+                            "Invalid choice. Please enter a number between 1 and {}.",
+                            repositories.len()
+                        );
+                    }
+                } else {
+                    println!("Invalid input. Please enter a number.");
+                }
+            } else {
+                println!("Error reading input.");
+            }
+        }
+        Err(_) => {
+            println!(
+                "Failed to list repositories. The directory may not exist or is inaccessible."
+            );
+        }
+    }
+}
+
+fn delete_notes_in_repository(repo_name: &str) {
+    let note_dir = format!("{}/.prive/{}", env::var("HOME").unwrap(), repo_name);
 
     match fs::read_dir(&note_dir) {
         Ok(dir_contents) => {
@@ -698,7 +768,7 @@ fn delete_note() {
                 .collect();
 
             if secured_files.is_empty() {
-                println!("No secured notes found in ~/.prive-note.");
+                println!("No secured notes found in {}.", note_dir);
                 return;
             }
 
@@ -715,24 +785,17 @@ fn delete_note() {
                         let selected_file = &secured_files[choice - 1];
                         println!("Deleting note: {}", selected_file);
 
-                        let target_dir = format!("{}/.prive-note/", env::var("HOME").unwrap());
+                        // Construct the file path correctly
+                        let file_to_delete = format!("{}/{}", note_dir, selected_file);
+                        println!("File to delete: {}", file_to_delete);
 
-                        if let Err(_) = env::set_current_dir(&target_dir) {
-                            println!("Failed to change directory to {}", target_dir);
+                        // Delete the selected note file
+                        if let Err(err) = fs::remove_file(&file_to_delete) {
+                            println!("Failed to delete note file: {}", err);
                             return;
                         }
 
-                        // Encrypt the file
-                        let encrypted_file_secure = format!("{}", selected_file);
-                        // Add, commit, and push the encrypted file
-                        run_cmd(&format!("git rm -rf {}", encrypted_file_secure));
-                        std::thread::sleep(Duration::from_secs(1));
-                        let commit_message = format!("Delete note: {}", selected_file);
-                        run_cmd("git commit -m remove");
-                        std::thread::sleep(Duration::from_secs(1));
-                        run_cmd("git push origin main");
-
-                        println!("Changes committed and pushed successfully.");
+                        println!("Note '{}' deleted successfully.", selected_file);
                     } else {
                         println!(
                             "Invalid choice. Please enter a number between 1 and {}.",
@@ -753,6 +816,7 @@ fn delete_note() {
         }
     }
 }
+
 /// Opens a note in Vim, encrypts it back after editing and exiting Vim, and deletes the original note file
 fn open_note(note: &str) {
     let note_path = format!("{}/.prive-note/{}", env::var("HOME").unwrap(), note);
