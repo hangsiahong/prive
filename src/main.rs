@@ -10,16 +10,12 @@ use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::{env, io};
 use std::str;
-
+use std::{env, io};
 
 use std::error::Error;
 use std::fs::OpenOptions;
 use std::time::Duration;
-
-
-
 
 /// Command-line arguments for the program
 #[derive(Parser, Debug)]
@@ -31,7 +27,6 @@ struct Args {
     #[arg(short, long)]
     /// Clone private access note from other Repository
     clone: Option<String>,
-
 }
 
 /// Struct to represent the login state
@@ -77,7 +72,11 @@ struct NoteDatabase {
 impl NoteDatabase {
     /// Loads the note database from a configuration file
     fn load(repo_name: &str) -> Self {
-        let db_file = format!("{}/.prive/{}/note-db.json", env::var("HOME").unwrap(), repo_name);
+        let db_file = format!(
+            "{}/.prive/{}/note-db.json",
+            env::var("HOME").unwrap(),
+            repo_name
+        );
 
         if let Ok(mut file) = File::open(&db_file) {
             let mut contents = String::new();
@@ -94,7 +93,11 @@ impl NoteDatabase {
 
     /// Saves the note database to a configuration file
     fn save(&self, repo_name: &str) {
-        let db_file = format!("{}/.prive/{}/note-db.json", env::var("HOME").unwrap(), repo_name);
+        let db_file = format!(
+            "{}/.prive/{}/note-db.json",
+            env::var("HOME").unwrap(),
+            repo_name
+        );
         let serialized = serde_json::to_string(self).unwrap();
         fs::write(db_file, serialized).unwrap();
     }
@@ -252,11 +255,17 @@ fn pull_repository(repo_path: &str) {
 /// Creates a new repository
 fn create_repository(repo_path: &str, github_username: &str) {
     println!("Creating repository at {}", repo_path);
-    run_cmd(&format!("gh repo create {}/prive-note --private", github_username));
+    run_cmd(&format!(
+        "gh repo create {}/prive-note --private",
+        github_username
+    ));
 
     let target_dir = format!("{}/.prive/", env::var("HOME").unwrap());
     println!("Cloning repository to {}", target_dir);
-    run_cmd(&format!("gh repo clone {}/prive-note {}/{}", github_username, target_dir, github_username));
+    run_cmd(&format!(
+        "gh repo clone {}/prive-note {}/{}",
+        github_username, target_dir, github_username
+    ));
 }
 
 /// Runs a command in the shell
@@ -591,14 +600,12 @@ fn create_note_in_repo(repo_name: &str) {
     let mut note_db = NoteDatabase::load(repo_name);
     println!("Note database loaded");
 
-
     // Set current directory to the note directory
     if let Err(_) = env::set_current_dir(&note_dir) {
         println!("Failed to change directory to {}", note_dir);
         return;
     }
     println!("Changed directory to {}", note_dir);
-
 
     println!("Enter the name of the new note:");
     let mut note_name = String::new();
@@ -627,8 +634,12 @@ fn create_note_in_repo(repo_name: &str) {
                     println!("Enter the password hint:");
                     let mut password_hint = String::new();
                     if let Ok(_) = io::stdin().read_line(&mut password_hint) {
-                        note_db.set_password_hint(&secured_note_name, password_hint.trim().to_string());
-                        note_db.save(repo_name);                    }
+                        note_db.set_password_hint(
+                            &secured_note_name,
+                            password_hint.trim().to_string(),
+                        );
+                        note_db.save(repo_name);
+                    }
                 }
             }
 
@@ -687,6 +698,7 @@ fn create_note_in_repo(repo_name: &str) {
     std::thread::sleep(Duration::from_secs(1));
     run_cmd("git push origin main");
 }
+
 /// Deletes a note from a selected repository
 fn delete_note() {
     let prive_dir = format!("{}/.prive", env::var("HOME").unwrap());
@@ -794,6 +806,29 @@ fn delete_notes_in_repository(repo_name: &str) {
                             println!("Failed to delete note file: {}", err);
                             return;
                         }
+
+                        // set the current directory
+                        env::set_current_dir(note_dir);
+
+                        if !run_cmd(&format!("git add {}", file_to_delete)) {
+                            println!("Failed to stage changes.");
+                            return;
+                        }
+
+                        std::thread::sleep(Duration::from_secs(1));
+                        if !run_cmd("git commit -m 'update'") {
+                            println!("Failed to commit changes.");
+                            return;
+                        }
+
+                        std::thread::sleep(Duration::from_secs(1));
+                        if !run_cmd("git push origin main") {
+                            println!("Failed to push changes.");
+                            return;
+                        }
+
+                        println!("Changes committed and pushed successfully.");
+
 
                         println!("Note '{}' deleted successfully.", selected_file);
                     } else {
