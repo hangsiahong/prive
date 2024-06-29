@@ -9,3 +9,4 @@ git2 = "0.13"
 clap = { version = "4.5.4", features = ["derive"] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+rpassword = "7.3.1"
